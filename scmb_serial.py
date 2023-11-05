@@ -86,28 +86,51 @@ def receive_response(ser):
         print(f"Error communicating with the serial device: {e}")
         return None
 
+def get_custom_packet():
+    # Prompt the user for packet parameters
+    attn = int(input("Enter ATTN (0-15): "), 16)
+    ttl = int(input("Enter TTL (0-3): "), 16)
+    data_length = int(input("Enter data length (0-7): "), 16)
+    packet_id = int(input("Enter packet ID (0-31): "), 16)
+
+    # Prompt the user for data bytes
+    data = bytearray()
+    for i in range(data_length):
+        byte_value = int(input(f"Enter data byte {i + 1} (00-FF): "), 16)
+        data.append(byte_value)
+
+    custom_packet = IbcPkt(attn, ttl, data_length, packet_id, data)
+    return custom_packet
 
 def display_menu(messages, ser):
     while True:
         print("Select an option:")
         for i, (description, packet) in enumerate(messages):
             print(f"{i}: {description} - {packet}")
+        print("c: Send Custom Packet")
         print("q: Quit")
 
         user_input = input("Enter your choice: ")
 
         if user_input == 'q':
             break
+        elif user_input == 'c':
+            custom_packet = get_custom_packet()
+            send_message(ser, custom_packet)
+            response = receive_response(ser)
+            if response:
+                print(f"Received: {response}")
+        else:
+            try:
+                choice = int(user_input)
+                if 0 <= choice < len(messages):
+                    send_message(ser, messages[choice][1])
+                    response = receive_response(ser)
+                else:
+                    print("Invalid option. Please choose a valid number.")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
 
-        try:
-            choice = int(user_input)
-            if 0 <= choice < len(messages):
-                send_message(ser, messages[choice][1])
-                response = receive_response(ser)
-            else:
-                print("Invalid option. Please choose a valid number.")
-        except ValueError:
-            print("Invalid input. Please enter a number.")
 
 
 if __name__ == "__main__":
@@ -122,15 +145,30 @@ if __name__ == "__main__":
                 ("Set regA=5", IbcPkt(attn=0xF, ttl=2,
                                       data_length=4, packet_id=4,
                                       data=bytearray([0x00, 0x00, 0x00, 0x05]))),
+                ("Set regA=33", IbcPkt(attn=0xF, ttl=2,
+                                      data_length=4, packet_id=4,
+                                      data=bytearray([0x00, 0x00, 0x00, 0x21]))),
                 ("Set regB=0", IbcPkt(attn=0xF, ttl=2,
                                       data_length=4, packet_id=5,
                                       data=bytearray([0x00, 0x00, 0x00, 0x00]))),
+                ("Set regB=37", IbcPkt(attn=0xF, ttl=2,
+                                      data_length=4, packet_id=5,
+                                      data=bytearray([0x00, 0x00, 0x00, 0x25]))),
                 ("Set op rs1 + rs2", IbcPkt(attn=0xF, ttl=2,
                                             data_length=1, packet_id=0xC,
                                             data=bytearray([0x00]))),
                 ("Set op rs1 - rs2", IbcPkt(attn=0xF, ttl=2,
                                             data_length=1, packet_id=0xC,
                                             data=bytearray([0x20]))),
+                ("Set op rs1 ^ rs2", IbcPkt(attn=0xF, ttl=2,
+                                            data_length=1, packet_id=0xC,
+                                            data=bytearray([0x10]))),
+                ("Set op rs1 | rs2", IbcPkt(attn=0xF, ttl=2,
+                                            data_length=1, packet_id=0xC,
+                                            data=bytearray([0x18]))),
+                ("Set op rs1 & rs2", IbcPkt(attn=0xF, ttl=2,
+                                            data_length=1, packet_id=0xC,
+                                            data=bytearray([0x1C]))),
                 ("CLK EDGE", IbcPkt(attn=0xF, ttl=3,
                                     data_length=1, packet_id=0xF,
                                     data=bytearray([0x00])))
