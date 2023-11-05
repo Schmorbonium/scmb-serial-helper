@@ -1,5 +1,39 @@
 import serial
 
+
+class IbcPkt:
+    def __init__(self, attn=0, ttl=0, data_length=0, packet_id=0, data=bytearray()):
+        self.attn = attn
+        self.ttl = ttl
+        self.data_length = data_length
+        self.packet_id = packet_id
+        self.data = data
+
+    def pack(self):
+        """Pack the packet fields into bytes."""
+        header = ((self.attn & 0x0F) << 12) | ((self.ttl & 0x03) << 8) | \
+                 ((self.data_length & 0x07) << 5) | (self.packet_id & 0x1F)
+        header_bytes = header.to_bytes(2, byteorder='big')
+        return header_bytes + self.data
+
+    @classmethod
+    def unpack(cls, packet_bytes):
+        """Unpack bytes into an IbcPkt object."""
+        header_bytes, data_bytes = packet_bytes[:2], packet_bytes[2:]
+        header = int.from_bytes(header_bytes, byteorder='big')
+        attn = (header >> 12) & 0x0F
+        ttl = (header >> 8) & 0x03
+        data_length = (header >> 5) & 0x07
+        packet_id = header & 0x1F
+
+        packet = cls(attn, ttl, data_length, packet_id)
+        packet.data = bytearray(data_bytes)  # Set the data field
+        return packet
+
+    def __str__(self):
+        return f"IbcPkt(attn=0x{self.attn:1X}, ttl=0x{self.ttl:1X}, data_length={self.data_length}, packet_id=0x{self.packet_id:2X}, data=0x{''.join([f'{byte:02X}' for byte in self.data])})"
+
+
 def find_available_serial_ports() -> list:
     available_ports = []
     try:
@@ -11,6 +45,7 @@ def find_available_serial_ports() -> list:
         for port in serial.tools.list_ports.comports():
             available_ports.append((port.device, port.description))
     return available_ports
+
 
 def select_serial_port(available_ports):
     if not available_ports:
@@ -32,28 +67,31 @@ def select_serial_port(available_ports):
         except ValueError:
             print("Invalid input. Please enter a number.")
 
-def send_message(ser, message):
+
+def send_message(ser, packet):
     try:
-        ser.write(message)
-        formatted_message = ''.join([f'{byte:02X}' for byte in message])
-        print(f"Sent: 0x{formatted_message}")
+        ser.write(packet.pack())
+        print(f"Sent: {packet}")
     except serial.SerialException as e:
         print(f"Error communicating with the serial device: {e}")
 
+
 def receive_response(ser):
     try:
-        response = ser.read(12)
-        return response
+        response_bytes = ser.read(12)
+        response_packet = IbcPkt.unpack(response_bytes)
+        print(f"Received: {response_packet}")
+        return response_packet
     except serial.SerialException as e:
         print(f"Error communicating with the serial device: {e}")
         return None
 
+
 def display_menu(messages, ser):
     while True:
         print("Select an option:")
-        for i, (description, hex_value) in enumerate(messages):
-            formatted_hex_value = ''.join([f'{byte:02X}' for byte in hex_value])
-            print(f"{i}: {description} - 0x{formatted_hex_value}")
+        for i, (description, packet) in enumerate(messages):
+            print(f"{i}: {description} - {packet}")
         print("q: Quit")
 
         user_input = input("Enter your choice: ")
@@ -66,13 +104,11 @@ def display_menu(messages, ser):
             if 0 <= choice < len(messages):
                 send_message(ser, messages[choice][1])
                 response = receive_response(ser)
-                if response:
-                    formatted_response = ''.join([f'{byte:02X}' for byte in response])
-                    print(f"Received: 0x{formatted_response}")
             else:
                 print("Invalid option. Please choose a valid number.")
         except ValueError:
             print("Invalid input. Please enter a number.")
+
 
 if __name__ == "__main__":
     available_ports = find_available_serial_ports()
@@ -83,8 +119,21 @@ if __name__ == "__main__":
         try:
             ser = serial.Serial(selected_port, 115200, timeout=1)
             messages = [
-                ("Set regA=5", b"\xF2\x84\x00\x00\x00\x00\x05"),
-                ("Set regB=0", b"\xF2\x85\x00\x00\x00\x00\x00"),
+                ("Set regA=5", IbcPkt(attn=0xF, ttl=2,
+                                      data_length=4, packet_id=4,
+                                      data=bytearray([0x00, 0x00, 0x00, 0x05]))),
+                ("Set regB=0", IbcPkt(attn=0xF, ttl=2,
+                                      data_length=4, packet_id=5,
+                                      data=bytearray([0x00, 0x00, 0x00, 0x00]))),
+                ("Set op rs1 + rs2", IbcPkt(attn=0xF, ttl=2,
+                                            data_length=1, packet_id=0xC,
+                                            data=bytearray([0x00]))),
+                ("Set op rs1 - rs2", IbcPkt(attn=0xF, ttl=2,
+                                            data_length=1, packet_id=0xC,
+                                            data=bytearray([0x20]))),
+                ("CLK EDGE", IbcPkt(attn=0xF, ttl=3,
+                                    data_length=1, packet_id=0xF,
+                                    data=bytearray([0x00])))
                 # Add more messages as needed
             ]
             display_menu(messages, ser)
